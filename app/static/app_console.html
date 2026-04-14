@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OCR Console</title>
+  <style>
+    body{margin:0;font:14px/1.4 "Segoe UI",sans-serif;background:#f5f1e8;color:#1f1c17}
+    .hidden{display:none}.wrap{padding:16px}.grid{display:grid;grid-template-columns:320px 1fr 420px;gap:16px}.card{background:#fffdf8;border:1px solid #d8cfbf;border-radius:18px;padding:14px;box-shadow:0 10px 24px rgba(43,32,17,.08);margin-bottom:16px}.muted{color:#736a5f}.top{display:flex;justify-content:space-between;gap:12px;align-items:center}
+    input,select,textarea,button{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:12px;font:inherit}input,select,textarea{border:1px solid #d8cfbf;background:#fff}button{border:none;background:#1f5f4a;color:#fff;font-weight:700;cursor:pointer}button.secondary{background:#67726c}button.warning{background:#c97844}button.danger{background:#ba4232}button.ghost{background:#fff;color:#1f5f4a;border:1px solid #1f5f4a}.row{display:flex;gap:10px;flex-wrap:wrap}.row button{width:auto}
+    .drop{border:2px dashed #d8cfbf;border-radius:16px;padding:16px;text-align:center;background:#faf5eb}.drop.drag{border-color:#1f5f4a;background:#eef6f2}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px 10px;border-bottom:1px solid #ece4d5;text-align:left;vertical-align:top}th{background:#f7f2e8}.sel{background:#eef6f2}.imgbox img{width:100%;border:1px solid #d8cfbf;border-radius:12px;margin-bottom:12px}.editor-row{border:1px solid #d8cfbf;border-radius:14px;padding:10px;margin-bottom:10px;background:#fff}.cols2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cols3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}.json{white-space:pre-wrap;word-break:break-word;max-height:280px;overflow:auto;background:#17140f;color:#f6efe0;border-radius:12px;padding:12px}
+    @media (max-width:1400px){.grid{grid-template-columns:320px 1fr}.side2{grid-column:1/-1}}@media (max-width:980px){.grid,.cols2,.cols3{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div id="login" class="wrap">
+  <div class="card" style="max-width:420px;margin:40px auto">
+    <h2 style="margin:0 0 8px">OCR Console</h2>
+    <div class="muted">Вход по базовой авторизации</div>
+    <div id="loginErr" class="muted" style="color:#ba4232;min-height:18px;margin:10px 0"></div>
+    <label>Логин</label><input id="u">
+    <label>Пароль</label><input id="p" type="password">
+    <button onclick="login()">Войти</button>
+    <div class="muted" style="margin-top:10px">По умолчанию: admin/admin123 и operator/operator123</div>
+  </div>
+</div>
+
+<div id="app" class="wrap hidden">
+  <div class="grid">
+    <aside>
+      <div class="card">
+        <div class="top">
+          <div><h2 style="margin:0">Документы</h2><div class="muted">Загрузка, статусы, экспорт</div></div>
+          <div><span id="me" class="muted"></span><div class="row" style="margin-top:6px"><button class="ghost" onclick="logout()">Выйти</button></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Batch Upload</h3>
+        <div id="drop" class="drop">Перетащите PDF/JPG/PNG сюда<div class="muted" style="margin:8px 0">До 50 файлов, каждый до 10 МБ</div><input id="files" type="file" multiple accept=".pdf,.jpg,.jpeg,.png"></div>
+        <div class="row" style="margin-top:10px"><button onclick="upload()">Загрузить</button><button class="secondary" onclick="loadDocs()">Обновить</button><button class="danger" onclick="deleteDoc()">Удалить</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Действия</h3>
+        <div class="row"><button class="warning" onclick="processDoc()">Обработать</button><button class="secondary" onclick="showPreview()">Показать</button><button onclick="downloadExcel()">Excel</button><button class="secondary" onclick="downloadSource()">Исходник</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Реестр</h3>
+        <div style="overflow:auto;max-height:60vh">
+          <table><thead><tr><th>ID</th><th>Файл</th><th>Статус</th><th>Правки</th></tr></thead><tbody id="docs"></tbody></table>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <div class="card">
+        <div class="top"><div><h2 style="margin:0">Предпросмотр</h2><div id="meta" class="muted">Документ не выбран</div></div></div>
+        <div id="pages" class="imgbox muted">Нет данных</div>
+      </div>
+    </main>
+
+    <aside class="side2">
+      <div class="card"><h2 style="margin:0 0 8px">Результат</h2><div id="summary" class="muted">Нет данных</div></div>
+      <div class="card"><h3 style="margin-top:0">Ручная корректировка</h3><div id="editor" class="muted">Выберите документ</div></div>
+      <div class="card"><h3 style="margin-top:0">JSON</h3><div id="json" class="json">Нет данных</div></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+let token=localStorage.getItem('ocr_token')||'',me=null,docs=[],selectedId=null,currentDoc=null;
+const q=s=>document.querySelector(s), esc=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+const active=()=>currentDoc?.effective_json||currentDoc?.updated_json||currentDoc?.parsed_json||{};
+const statusLabel=s=>({queued:'🟡 В очереди',processing:'🔵 Обрабатывается','Успешно':'🟢 Успешно','Требует проверки':'🟡 Требует проверки','Ошибка':'🔴 Ошибка'}[s]||s||'🟡 В очереди');
+async function api(url,opt={}){opt.headers={...(opt.headers||{}),...(token?{Authorization:`Basic ${token}`}:{})};const r=await fetch(url,opt);if(r.status===401){logout();throw new Error('auth')}return r}
+async function fetchBlobUrl(url){const r=await api(url);if(!r.ok)throw new Error(await r.text());const blob=await r.blob();return URL.createObjectURL(blob)}
+async function downloadByFetch(url,fallbackName){const r=await api(url);if(!r.ok){alert(await r.text());return}const blob=await r.blob();const href=URL.createObjectURL(blob);const a=document.createElement('a');a.href=href;a.download=fallbackName||'';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),1000)}
+async function login(){const username=q('#u').value.trim(),password=q('#p').value;const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});if(!r.ok){q('#loginErr').textContent='Неверный логин или пароль';return}const d=await r.json();token=d.token;me=d.user;localStorage.setItem('ocr_token',token);showApp();await init()}
+function logout(){token='';me=null;localStorage.removeItem('ocr_token');q('#login').classList.remove('hidden');q('#app').classList.add('hidden')}
+function showApp(){q('#login').classList.add('hidden');q('#app').classList.remove('hidden');q('#me').textContent=`${me.username} · ${me.role}`}
+async function restore(){if(!token)return;try{const r=await api('/api/auth/me');me=await r.json();showApp();await init()}catch(e){logout()}}
+async function init(){initDrop();await loadDocs();if(docs.length&&!selectedId){selectedId=docs[0].id;await openDoc(selectedId)}}
+function initDrop(){const d=q('#drop');d.ondragover=e=>{e.preventDefault();d.classList.add('drag')};d.ondragleave=()=>d.classList.remove('drag');d.ondrop=async e=>{e.preventDefault();d.classList.remove('drag');const files=[...(e.dataTransfer.files||[])];if(files.length)await upload(files)}}
+async function upload(fromDrop){const files=fromDrop||[...q('#files').files||[]];if(!files.length){alert('Выберите файлы');return}const fd=new FormData();files.forEach(f=>fd.append('files',f));const r=await api('/api/documents/upload-batch',{method:'POST',body:fd});if(!r.ok){alert(await r.text());return}await loadDocs();const items=await r.json();if(items.length){selectedId=items[0].id;await openDoc(selectedId)}q('#files').value=''}
+async function loadDocs(){const r=await api('/api/documents');docs=await r.json();q('#docs').innerHTML=docs.length?docs.map(d=>`<tr class="${d.id===selectedId?'sel':''}" onclick="pick(${d.id})"><td>${d.id}</td><td>${esc(d.original_filename)}</td><td>${esc(statusLabel(d.processing_status))}</td><td>${d.has_manual_corrections?'Да':'Нет'}</td></tr>`).join(''):'<tr><td colspan="4" class="muted">Пока пусто</td></tr>'}
+async function pick(id){selectedId=id;await openDoc(id);await loadDocs()}
+async function openDoc(id){const r=await api(`/api/documents/${id}`);currentDoc=await r.json();const a=active();q('#json').textContent=JSON.stringify(a,null,2);renderSummary(a);renderEditor(a);q('#meta').textContent=`#${currentDoc.id} · ${currentDoc.original_filename} · ${a.processing?.status||currentDoc.processing_status}`}
+function renderSummary(a){const s=a.seller||{},b=a.buyer||{},t=a.totals||{},g=a.signatures||{};q('#summary').innerHTML=`<div class="cols2"><div><b>Тип:</b> ${esc(a.document_type||'')}<br><b>Номер:</b> ${esc(a.document_number||'')}<br><b>Дата:</b> ${esc(a.document_date||'')}<br><b>Назначение:</b> ${esc(a.payment_purpose||'')}<br><b>Статус:</b> ${esc(a.processing?.status||'')}</div><div><b>Продавец:</b> ${esc(s.name||'')}<br><b>ИНН:</b> ${esc(s.inn||'')}<br><b>Покупатель:</b> ${esc(b.name||'')}<br><b>ИНН:</b> ${esc(b.inn||'')}</div><div><b>Без НДС:</b> ${esc(t.amount_without_vat||'')}<br><b>НДС:</b> ${esc(t.vat_amount||'')}<br><b>С НДС:</b> ${esc(t.amount_with_vat||'')}</div><div><b>Печать:</b> ${g.seal_present?'Да':'Нет'}<br><b>Руководитель:</b> ${g.director_signature_present?'Да':'Нет'}<br><b>Бухгалтер:</b> ${g.accountant_signature_present?'Да':'Нет'}<br><b>Исполнитель:</b> ${g.contractor_signature_present?'Да':'Нет'}<br><b>Заказчик:</b> ${g.customer_signature_present?'Да':'Нет'}</div></div>`}
+function renderEditor(a){const s=a.seller||{},b=a.buyer||{},t=a.totals||{},g=a.signatures||{},items=a.line_items||[];q('#editor').innerHTML=`<div class="cols2"><div><label>Тип документа</label><input id="f_document_type" value="${esc(a.document_type||'')}"></div><div><label>Номер</label><input id="f_document_number" value="${esc(a.document_number||'')}"></div><div><label>Дата</label><input id="f_document_date" value="${esc(a.document_date||'')}"></div><div><label>Назначение</label><input id="f_payment_purpose" value="${esc(a.payment_purpose||'')}"></div><div><label>Продавец</label><input id="f_seller_name" value="${esc(s.name||'')}"></div><div><label>ИНН продавца</label><input id="f_seller_inn" value="${esc(s.inn||'')}"></div><div><label>КПП продавца</label><input id="f_seller_kpp" value="${esc(s.kpp||'')}"></div><div><label>Покупатель</label><input id="f_buyer_name" value="${esc(b.name||'')}"></div><div><label>ИНН покупателя</label><input id="f_buyer_inn" value="${esc(b.inn||'')}"></div><div><label>КПП покупателя</label><input id="f_buyer_kpp" value="${esc(b.kpp||'')}"></div><div><label>Сумма без НДС</label><input id="f_total_wo_vat" value="${esc(t.amount_without_vat||'')}"></div><div><label>Сумма НДС</label><input id="f_vat_total" value="${esc(t.vat_amount||'')}"></div><div><label>Сумма с НДС</label><input id="f_total_w_vat" value="${esc(t.amount_with_vat||'')}"></div><div><label>Текст печати</label><input id="f_seal_text" value="${esc(g.seal_text||'')}"></div></div><div style="margin:10px 0"><label><input id="c_seal" type="checkbox" ${g.seal_present?'checked':''}> Печать</label> <label><input id="c_dir" type="checkbox" ${g.director_signature_present?'checked':''}> Руководитель</label> <label><input id="c_acc" type="checkbox" ${g.accountant_signature_present?'checked':''}> Бухгалтер</label> <label><input id="c_con" type="checkbox" ${g.contractor_signature_present?'checked':''}> Исполнитель</label> <label><input id="c_cus" type="checkbox" ${g.customer_signature_present?'checked':''}> Заказчик</label></div><div class="row"><button onclick="addRow()">Добавить строку</button><button class="secondary" onclick="renderEditor(active())">Сбросить</button><button onclick="saveCorr()">Сохранить правки</button></div><div id="rows">${items.map((x,i)=>rowHtml(x,i)).join('')}</div>`}
+function rowHtml(x,i){return `<div class="editor-row" data-i="${i}"><div class="cols3"><div><label>№</label><input data-k="row_no" value="${esc(x.row_no||'')}"></div><div><label>Кол-во</label><input data-k="quantity" value="${esc(x.quantity||'')}"></div><div><label>Ед.</label><input data-k="unit" value="${esc(x.unit||'')}"></div><div><label>Цена</label><input data-k="price" value="${esc(x.price||'')}"></div><div><label>Сумма</label><input data-k="amount" value="${esc(x.amount||'')}"></div><div><label>НДС %</label><input data-k="vat_rate" value="${esc(x.vat_rate||'')}"></div></div><label>Наименование</label><textarea data-k="name">${esc(x.name||'')}</textarea><div class="cols2"><div><label>Сумма НДС</label><input data-k="vat_amount" value="${esc(x.vat_amount||'')}"></div><div class="row" style="align-items:end"><button class="danger" type="button" onclick="delRow(${i})">Удалить строку</button></div></div></div>`}
+function collect(){const a=active(), rows=[...document.querySelectorAll('#rows .editor-row')].map(r=>{const o={};r.querySelectorAll('[data-k]').forEach(i=>o[i.dataset.k]=i.value.trim());return o});return {...a,document_type:q('#f_document_type').value.trim(),document_number:q('#f_document_number').value.trim(),document_date:q('#f_document_date').value.trim(),payment_purpose:q('#f_payment_purpose').value.trim(),seller_name:q('#f_seller_name').value.trim(),seller_inn:q('#f_seller_inn').value.trim(),seller_kpp:q('#f_seller_kpp').value.trim(),buyer_name:q('#f_buyer_name').value.trim(),buyer_inn:q('#f_buyer_inn').value.trim(),buyer_kpp:q('#f_buyer_kpp').value.trim(),total_wo_vat:q('#f_total_wo_vat').value.trim(),vat_total:q('#f_vat_total').value.trim(),total_w_vat:q('#f_total_w_vat').value.trim(),seller:{name:q('#f_seller_name').value.trim(),inn:q('#f_seller_inn').value.trim(),kpp:q('#f_seller_kpp').value.trim()},buyer:{name:q('#f_buyer_name').value.trim(),inn:q('#f_buyer_inn').value.trim(),kpp:q('#f_buyer_kpp').value.trim()},totals:{amount_without_vat:q('#f_total_wo_vat').value.trim(),vat_amount:q('#f_vat_total').value.trim(),amount_with_vat:q('#f_total_w_vat').value.trim()},signatures:{seal_present:q('#c_seal').checked,seal_text:q('#f_seal_text').value.trim(),director_signature_present:q('#c_dir').checked,accountant_signature_present:q('#c_acc').checked,contractor_signature_present:q('#c_con').checked,customer_signature_present:q('#c_cus').checked},line_items:rows,table_items:rows,table:rows}}
+async function saveCorr(){if(!selectedId){alert('Выберите документ');return}const r=await api(`/api/documents/${selectedId}/corrections`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:collect()})});if(!r.ok){alert(await r.text());return}currentDoc=await r.json();q('#json').textContent=JSON.stringify(active(),null,2);renderSummary(active());renderEditor(active());await loadDocs();alert('Правки сохранены')}
+function addRow(){const a=active();const items=[...(a.line_items||[])];items.push({row_no:'',name:'',quantity:'',unit:'',price:'',amount:'',vat_rate:'',vat_amount:''});renderEditor({...a,line_items:items})}
+function delRow(i){const a=active();const items=[...(a.line_items||[])];items.splice(i,1);renderEditor({...a,line_items:items})}
+async function showPreview(){if(!selectedId){alert('Выберите документ');return}if(!currentDoc||currentDoc.id!==selectedId)await openDoc(selectedId);const n=currentDoc.pages_count||1;q('#pages').innerHTML='';for(let i=1;i<=n;i++){const div=document.createElement('div');div.innerHTML=`<div style="font-weight:700;margin-bottom:6px">Страница ${i}</div><div class="muted">Загрузка...</div>`;q('#pages').appendChild(div);try{const src=await fetchBlobUrl(`/api/documents/${selectedId}/preview/${i}?ts=${Date.now()}`);div.innerHTML=`<div style="font-weight:700;margin-bottom:6px">Страница ${i}</div><img src="${src}">`;}catch(err){div.innerHTML=`<div style="font-weight:700;margin-bottom:6px">Страница ${i}</div><div class="muted" style="color:#ba4232">Не удалось загрузить предпросмотр</div>`;}}}
+async function processDoc(){if(!selectedId){alert('Выберите документ');return}const r=await api(`/api/documents/${selectedId}/process`,{method:'POST'});if(!r.ok){alert(await r.text());return}currentDoc=await r.json();await loadDocs();q('#json').textContent=JSON.stringify(active(),null,2);renderSummary(active());renderEditor(active())}
+async function downloadExcel(){if(!selectedId){alert('Выберите документ');return}await downloadByFetch(`/api/documents/${selectedId}/export/xlsx`,`document_${selectedId}.xlsx`)}
+async function downloadSource(){if(!selectedId){alert('Выберите документ');return}await downloadByFetch(`/api/documents/${selectedId}/download`,`document_${selectedId}`)}
+async function deleteDoc(){if(!selectedId){alert('Выберите документ');return}if(me?.role!=='admin'){alert('Удаление доступно только администратору');return}if(!confirm('Удалить документ?'))return;const r=await api(`/api/documents/${selectedId}`,{method:'DELETE'});if(!r.ok){alert(await r.text());return}selectedId=null;currentDoc=null;q('#pages').innerHTML='Нет данных';q('#summary').innerHTML='Нет данных';q('#editor').innerHTML='Выберите документ';q('#json').textContent='Нет данных';await loadDocs()}
+restore();
+</script>
+</body>
+</html>

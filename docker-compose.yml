@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data:/data
+      - ./data/paddlex_cache:/root/.paddlex
+    environment:
+      - STORAGE_DIR=/data/storage
+      - EXPORT_DIR=/data/exports
+      - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
